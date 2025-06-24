@@ -23,7 +23,7 @@ import matplotlib.pyplot as plt
 # --- 設定項目 ---
 CONFIG = {
     # ★★★★★【要設定】わかっているビデオの開始位置を「時:分:秒.ミリ秒」で指定 ★★★★★
-    'KNOWN_VIDEO_START_TIME': '00:09:39.010',  # 例: '00:05:00.500' (5分0秒500ミリ秒)
+    'KNOWN_VIDEO_START_TIME': '00:00:00.000',  # 例: '00:05:00.500' (5分0秒500ミリ秒)
 
     'sample_rate': 16000,
     'lowpass_freq': 4000,
@@ -157,12 +157,11 @@ class AudioSyncWavOutput:
         return fig
 
 def main():
-    if len(sys.argv) != 3:
-        print(__doc__)
-        sys.exit(1)
-    
-    video_path = Path(sys.argv[1])
-    audio_path = Path(sys.argv[2])
+    # コンソールから動画と音声のパスを入力
+    video_input = input("動画ファイルのパスを入力してください: ")
+    audio_input = input("音声ファイルのパスを入力してください: ")
+    video_path = Path(video_input.strip())
+    audio_path = Path(audio_input.strip())
     
     if not video_path.exists() or not audio_path.exists():
         print(f"エラー: 指定されたファイルが見つかりません。")
@@ -217,28 +216,28 @@ def main():
     print("同期処理完了")
     print("="*60)
     
+    # オーディオ開始位置が負の場合、音声は0秒から開始し、動画をオーディオ開始位置に合わせて開始
     if final_audio_start_time < 0:
-        final_timecode = format_seconds_to_timecode(final_audio_start_time)
-        print(f"エラー: 計算された音声開始位置が負の値 ({final_timecode}) になりました。")
-        print("指定されたビデオ開始位置が、同期可能な範囲よりも前にある可能性があります。")
-        sys.exit(1)
-        
-    final_audio_start_timecode = format_seconds_to_timecode(final_audio_start_time)
-    
-    print(f"計算の結果、ビデオの開始位置 ({video_start_time_str}) に同期する")
-    print(f"外部音声の開始位置は {final_audio_start_timecode} ({final_audio_start_time:.3f} 秒) 地点となります。")
-    
+        print("情報: 計算された音声開始位置が負のため、音声は0秒から開始し、動画を音声開始位置に合わせて開始します。")
+        audio_ss = 0.0
+        shifted_video_start_sec = video_start_time_sec - final_audio_start_time
+        video_ss_str = format_seconds_to_timecode(shifted_video_start_sec)
+    else:
+        audio_ss = final_audio_start_time
+        video_ss_str = video_start_time_str
+
+    final_audio_start_timecode = format_seconds_to_timecode(audio_ss)
+    print(f"計算の結果、外部音声の開始位置: {final_audio_start_timecode}、動画の開始位置: {video_ss_str}")
+
     output_wav_filename = f"{audio_path.stem}_synchronized.wav"
     
     # --- WAVファイル生成コマンドの定義と実行 ---
     print("\n--- 同期済みWAVファイルをトリムして生成します ---")
     
-    # 切り取り長さ（秒）を90分＝5400秒に設定
-    duration_sec = 90 * 60
+    # 動画全体を処理（duration指定なし）
     command_list = [
         "ffmpeg", "-y",
-        "-ss", f"{final_audio_start_time:.3f}",
-        "-t", f"{duration_sec:.3f}",
+        "-ss", f"{audio_ss:.3f}",
         "-i", str(audio_path.resolve()),
         "-c:a", "pcm_s16le",
         output_wav_filename
@@ -257,12 +256,11 @@ def main():
 
     # --- 動画を同じ開始位置から90分間トリムして出力 ---
     video_output_filename = f"{video_path.stem}_trimmed.mp4"
-    print("\n--- 動画をトリムして出力します ---")
+    print("\n--- 動画全体を出力します ---")
     video_command = [
         "ffmpeg", "-y",
-        "-ss", video_start_time_str,
+        "-ss", video_ss_str,
         "-i", str(video_path.resolve()),
-        "-t", f"{duration_sec:.3f}",
         "-c:v", "copy",
         "-c:a", "aac",
         "-b:a", "128k",
